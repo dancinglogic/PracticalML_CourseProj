@@ -17,35 +17,37 @@ More information is available <a href="http://groupware.les.inf.puc-rio.br/har">
 
 All machine-learning work was performed using the caret and randomForest R packages.
 We used the doParallel package to speed things up.
-```{r libraries, message=FALSE}
+```{r libraries, message=FALSE, results='hide'}
 library(caret)
 library(randomForest)
 library(doParallel)
 registerDoParallel(cores=16)
-setwd("/home/jesse/practicalML/")
 ```
 
 
-I obtained the training and testing data sets from the URLs specified in the course project.
-The code for this is shown in the Appendix.
-```{r loaddata, cache=TRUE, include=FALSE}
+The training and testing data sets were obtained from the URLs specified in the course project.
+```{r loaddata, cache=TRUE, results='hide'}
 # Get training and test data
-download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+if(!file.exists("train.csv")){
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
               destfile="train.csv", method="curl")
-download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+}
+if(!file.exists("test.csv")){ 
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
               destfile="test.csv", method="curl")
+}
 training = read.table("train.csv", row.names=1, sep=",", header=TRUE)
 testing = read.table("test.csv", row.names=1, sep=",", header=TRUE)
 ```
 
-The training data has 158 variables. That's kind of a lot, so let's try to
+The training data has 158 variables (and one class label). That's kind of a lot of variables, so let's try to
 cut it down some.
 ```{r}
 dim(training)
 ```
 
 There are some columns that mostly consist of NAs. It appears that all columns are either 100% non-NA values, or about 98% NA values. Let's drop columns that are ~98% NA values because those probably aren't very useful for classification (equivalently, only keep columns that are almost 100% non-NA values).
-```{r}
+```{r cache=TRUE}
 # Calculate what percent of each column consists of actual values as opposed to NA
 percentOK <- sapply(names(training), function(x) {sum(! is.na(training[x])) / dim(training)[1]})
 unique(percentOK)
@@ -61,7 +63,7 @@ sum(complete.cases(training_92)) == dim(training_92)[1]
 There are still columns with values we can't use. Conveniently, these are
 columns that have close to zero variance anyway, so we can probably leave them out
 of the model-building with no ill effects.
-```{r}
+```{r cache=TRUE}
 # There are still columns with #DIV/0! here and there
 sum(training_92=="#DIV/0!")
 # Get rid of columns that don't look very useful, statistically speaking
@@ -74,42 +76,19 @@ sum(training_58=="#DIV/0!")
 
 Finally, get rid of the features such as participant names and timestamps since those don't make sense as predictors if the goal is to 
 make predictions using the accelerometer data.
-
 ```{r}
 training_reduced <- training_58[, 6:58]
-
 ```
 
-## Perform Cross-Validation to Select Features ##
+## Cross-Validation and Model Fitting##
 
-Since random forests can have a problem with overfitting, we used the rfcv function
-to help determine how many of the remaining 56 variables we should actually use for
-the final model.
-```{r, cache=TRUE}
+We use a random forest model because those consistently perform well.
+We split the data into features and labels to give to the model, rather than using a formula, because it appears that using a formula makes the model-building noticeably slower.
+```{r cache=TRUE}
 # Set up input to random forest methods
 features <- subset(training_reduced, select = -classe)
 labels <- training_reduced$classe
-# Let's see how many of the remaining 56 features R thinks we should use.
-# We are using cross validation for feature selection here to avoid overfitting.
-
-# Try to read the cached results of the cross-validation and
-# hope we've already done this, because it's really slow.
-if(file.exists("cv10_results.rds")){
-    result_cv10 <- readRDS("cv10_results.rds")
-}else {
-    set.seed(42)
-    result_cv10 <- rfcv(features, labels, cv.fold=10, step=0.75, ntree=500)
-    saveRDS(result_cv10, "cv10_results.rds")
-}
-
-# Plot the resulting error
-with(result_cv10, plot(n.var, error.cv, log="x", type="o", lwd=2))
-
-```
-
-The cross validation error is low at ?? features and then goes up again. While the error goes back down again with more features, this may be the result of overfitting.
-```{r}
-# How important were the various variables? 
+# Get the model, or generate it if we don't have it.
 if (file.exists("modelfit.rds")) {
   modelfit <- readRDS("modelfit.rds")
 } else {
@@ -117,22 +96,25 @@ if (file.exists("modelfit.rds")) {
     modelfit = train(features, labels, method="rf", ntree=500)
     saveRDS(modelfit, "modelfit.rds")
 }
-whichvars <- varImp(modelfit$finalModel)
-# Keep the useful ones
-whichvars[order(-whichvars$Overall), ,drop=FALSE][1:10,, drop=FALSE]
-# train up a little model with those
 ```
 
+When it comes to cross-validation, random forests are a bit of a special case. There is cross-validation going on, but it's hiding within the "train" method.
 
+According to <a href=
+"https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#ooberr">Breiman</a>
+there is no need to perform separate cross-validation when using random forests to get an estimate of the out-of-bag (oob) error. Essentially, cross-validation is being performed within the train() method that builds the random forest model. To build each tree a sample is taken from the original data. Part of this sample is used to build the tree, and the rest of the sample is used to estimate the error.
+
+We expect the out-of-bag error to be
+
+
+Finally, we predict the values for the testing set. After submitting we found that everything was predicted correctly.
 ```{r cache=TRUE}
-# Only keep the variables we used
+# Restrict the testing data to the variables we used in training.
 featurenames <- names(training_reduced)[names(training_reduced)!= "classe"]
 testing_reduced <- subset(testing, select=featurenames)
-
+# Predict on the training data
 pred <- predict(modelfit, newdata=testing_reduced)
-```
-
-```{r}
+# Function provided in project description
 pml_write_files = function(x){
   n = length(x)
   for(i in 1:n){
@@ -140,18 +122,6 @@ pml_write_files = function(x){
     write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
   }
 }
-```
-
-```{r} 
+# Write out results using provided function
 pml_write_files(as.character(pred))
-```
-
-## Appendix ##
-
-#### Code for Setting up R and Obtaining Data ####
-
-```{r libraries, eval=FALSE, include=TRUE}
-```
-
-```{r loaddata, eval=FALSE, include=TRUE}
 ```
