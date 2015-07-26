@@ -93,7 +93,7 @@ if(!file.exists(&quot;test.csv&quot;)){
 }
 training = read.table(&quot;train.csv&quot;, row.names=1, sep=&quot;,&quot;, header=TRUE)
 testing = read.table(&quot;test.csv&quot;, row.names=1, sep=&quot;,&quot;, header=TRUE)</code></pre>
-<p>The training data has 158 variables. That’s kind of a lot, so let’s try to cut it down some.</p>
+<p>The training data has 158 variables (and one class label). That’s kind of a lot of variables, so let’s try to cut it down some.</p>
 <pre class="r"><code>dim(training)</code></pre>
 <pre><code>## [1] 19622   159</code></pre>
 <p>There are some columns that mostly consist of NAs. It appears that all columns are either 100% non-NA values, or about 98% NA values. Let’s drop columns that are ~98% NA values because those probably aren’t very useful for classification (equivalently, only keep columns that are almost 100% non-NA values).</p>
@@ -126,7 +126,7 @@ sum(training_58==&quot;#DIV/0!&quot;)</code></pre>
 <pre class="r"><code>training_reduced &lt;- training_58[, 6:58]</code></pre>
 </div>
 <div id="cross-validation-and-model-fitting" class="section level2">
-<h2>Cross-Validation and model fitting</h2>
+<h2>Cross-Validation and Model Fitting</h2>
 <p>We use a random forest model because those consistently perform well. We split the data into features and labels to give to the model, rather than using a formula, because it appears that using a formula makes the model-building noticeably slower.</p>
 <pre class="r"><code># Set up input to random forest methods
 features &lt;- subset(training_reduced, select = -classe)
@@ -141,7 +141,12 @@ if (file.exists(&quot;modelfit.rds&quot;)) {
 }</code></pre>
 <p>When it comes to cross-validation, random forests are a bit of a special case. There is cross-validation going on, but it’s hiding within the “train” method.</p>
 <p>According to <a href="https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#ooberr">Breiman</a> there is no need to perform separate cross-validation when using random forests to get an estimate of the out-of-bag (oob) error. Essentially, cross-validation is being performed within the train() method that builds the random forest model. To build each tree a sample is taken from the original data. Part of this sample is used to build the tree, and the rest of the sample is used to estimate the error.</p>
-<p>We expect the out-of-bag error to be</p>
+<p>The object modelfit$finalModel is the final random forest model. The component err.rate is a vector where the ith component is the OOB error rate for all trees up to the ith. We thus expect the out-of-bag error to be the final component in this vector, or approximately 0.5%.</p>
+<pre class="r"><code>modelfit$finalModel$err.rate[500,]</code></pre>
+<pre><code>##          OOB            A            B            C            D 
+## 0.0046376516 0.0003584229 0.0036871214 0.0061367621 0.0149253731 
+##            E 
+## 0.0016634322</code></pre>
 <p>Finally, we predict the values for the testing set. After submitting we found that everything was predicted correctly.</p>
 <pre class="r"><code># Restrict the testing data to the variables we used in training.
 featurenames &lt;- names(training_reduced)[names(training_reduced)!= &quot;classe&quot;]

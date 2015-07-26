@@ -104,8 +104,12 @@ According to <a href=
 "https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#ooberr">Breiman</a>
 there is no need to perform separate cross-validation when using random forests to get an estimate of the out-of-bag (oob) error. Essentially, cross-validation is being performed within the train() method that builds the random forest model. To build each tree a sample is taken from the original data. Part of this sample is used to build the tree, and the rest of the sample is used to estimate the error.
 
-We expect the out-of-bag error to be
-
+The object modelfit$finalModel is the final random forest model.
+The component err.rate is a vector where the ith component is the OOB error rate for all trees up to the ith.
+We thus expect the out-of-bag error to be the final component in this vector, or approximately 0.5%.
+```{r}
+modelfit$finalModel$err.rate[500,]
+```
 
 Finally, we predict the values for the testing set. After submitting we found that everything was predicted correctly.
 ```{r cache=TRUE}
