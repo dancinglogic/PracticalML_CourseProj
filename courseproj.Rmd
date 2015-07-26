@@ -1,0 +1,157 @@
+---
+title: "PracticalML_CourseProj"
+author: "Jessica"
+date: "July 20, 2015"
+output: html_document
+---
+
+## Background ##
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to classify the quality of their barbell lifts. Participants were asked to perform barbell lifts correctly (Class A) and to simulate four common mistakes (Classes B, C, D, and E).
+
+More information is available <a href="http://groupware.les.inf.puc-rio.br/har">here</a> (see the section on the Weight Lifting Exercise Dataset). 
+
+## Getting and Cleaning Data ##
+
+All machine-learning work was performed using the caret and randomForest R packages.
+We used the doParallel package to speed things up.
+```{r libraries, message=FALSE}
+library(caret)
+library(randomForest)
+library(doParallel)
+registerDoParallel(cores=16)
+setwd("/home/jesse/practicalML/")
+```
+
+
+I obtained the training and testing data sets from the URLs specified in the course project.
+The code for this is shown in the Appendix.
+```{r loaddata, cache=TRUE, include=FALSE}
+# Get training and test data
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+              destfile="train.csv", method="curl")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+              destfile="test.csv", method="curl")
+training = read.table("train.csv", row.names=1, sep=",", header=TRUE)
+testing = read.table("test.csv", row.names=1, sep=",", header=TRUE)
+```
+
+The training data has 158 variables. That's kind of a lot, so let's try to
+cut it down some.
+```{r}
+dim(training)
+```
+
+There are some columns that mostly consist of NAs. It appears that all columns are either 100% non-NA values, or about 98% NA values. Let's drop columns that are ~98% NA values because those probably aren't very useful for classification (equivalently, only keep columns that are almost 100% non-NA values).
+```{r}
+# Calculate what percent of each column consists of actual values as opposed to NA
+percentOK <- sapply(names(training), function(x) {sum(! is.na(training[x])) / dim(training)[1]})
+unique(percentOK)
+# Either the column is all OK, or it's only 2% OK values. Only keep columns that are all OK.
+columnstokeep <- (percentOK > 0.9)
+sum(columnstokeep)
+# Looks like we're keeping 92 columns.
+training_92 <- subset(training, select=columnstokeep)
+sum(complete.cases(training_92)) == dim(training_92)[1]
+# Now all the NAs are gone.
+```
+
+There are still columns with values we can't use. Conveniently, these are
+columns that have close to zero variance anyway, so we can probably leave them out
+of the model-building with no ill effects.
+```{r}
+# There are still columns with #DIV/0! here and there
+sum(training_92=="#DIV/0!")
+# Get rid of columns that don't look very useful, statistically speaking
+nearZeroVarCols <- nearZeroVar(training_92)
+length(nearZeroVarCols)
+training_58 <- subset(training_92, select=-nearZeroVarCols)
+sum(training_58=="#DIV/0!")
+# Excellent. That appears to have gotten rid of the #DIV/0! cases.
+```
+
+Finally, get rid of the features such as participant names and timestamps since those don't make sense as predictors if the goal is to 
+make predictions using the accelerometer data.
+
+```{r}
+training_reduced <- training_58[, 6:58]
+
+```
+
+## Perform Cross-Validation to Select Features ##
+
+Since random forests can have a problem with overfitting, we used the rfcv function
+to help determine how many of the remaining 56 variables we should actually use for
+the final model.
+```{r, cache=TRUE}
+# Set up input to random forest methods
+features <- subset(training_reduced, select = -classe)
+labels <- training_reduced$classe
+# Let's see how many of the remaining 56 features R thinks we should use.
+# We are using cross validation for feature selection here to avoid overfitting.
+
+# Try to read the cached results of the cross-validation and
+# hope we've already done this, because it's really slow.
+if(file.exists("cv10_results.rds")){
+    result_cv10 <- readRDS("cv10_results.rds")
+}else {
+    set.seed(42)
+    result_cv10 <- rfcv(features, labels, cv.fold=10, step=0.75, ntree=500)
+    saveRDS(result_cv10, "cv10_results.rds")
+}
+
+# Plot the resulting error
+with(result_cv10, plot(n.var, error.cv, log="x", type="o", lwd=2))
+
+```
+
+The cross validation error is low at ?? features and then goes up again. While the error goes back down again with more features, this may be the result of overfitting.
+```{r}
+# How important were the various variables? 
+if (file.exists("modelfit.rds")) {
+  modelfit <- readRDS("modelfit.rds")
+} else {
+    set.seed(42)
+    modelfit = train(features, labels, method="rf", ntree=500)
+    saveRDS(modelfit, "modelfit.rds")
+}
+whichvars <- varImp(modelfit$finalModel)
+# Keep the useful ones
+whichvars[order(-whichvars$Overall), ,drop=FALSE][1:10,, drop=FALSE]
+# train up a little model with those
+```
+
+
+```{r cache=TRUE}
+# Only keep the variables we used
+featurenames <- names(training_reduced)[names(training_reduced)!= "classe"]
+testing_reduced <- subset(testing, select=featurenames)
+
+pred <- predict(modelfit, newdata=testing_reduced)
+```
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+```
+
+```{r} 
+pml_write_files(as.character(pred))
+```
+
+## Appendix ##
+
+#### Code for Setting up R and Obtaining Data ####
+
+```{r libraries, eval=FALSE, include=TRUE}
+```
+
+```{r loaddata, eval=FALSE, include=TRUE}
+```
